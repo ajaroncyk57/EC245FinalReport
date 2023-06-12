@@ -1,0 +1,643 @@
+---
+title: "Boston House Price Index"
+author: "Andrew Jaroncyk"
+date: "2018-14-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(car)
+library(dynlm)
+library(lmtest)
+library(forecast)
+library(urca)
+library(vars)
+```
+
+## Introduction
+
+This report intends to analyze the relationship between the Standard & Poor (S&P) CoreLogic Case-Shiller Boston Home Price NSA Index measure over the time periods of January 1987 to January 2023. In addition, the relationship of the S&P CoreLogic Case-Shiller Home Price Index Series, an index measuring the Home Price Index across all single-family housing stock across the United States, will also be analyzed within this specific timeframe. A time-series analysis will be conducted to further understand how the Boston Home Price Index and the United States Home Price Index have changed over the course of time through using the open-source statistical scripting language R. Data visualization will be used extensively to further analyze the Indexes over the course of time, and moving average and autoregressive models will be contrasted to accurately explain the relationship of these Indexes over time.
+
+## Background Information
+
+The **Standard & Poor (S&P) CoreLogic Case-Shiller Home Price NSA Index** is a measure of the average monthly change in the value of residential real estate in a given location assuming a constant level of quality. The area of interest that will be considered in this report is the Boston, Massachusetts area. Assume that for the analysis portion the specified Confidence Level is 95%, so $\alpha = 0.05$.
+
+## Analysis
+
+### Exploratory Analysis
+
+A time-series plot and histogram of the distribution of the Boston House Price Index is shown below, where the values of the Boston House Price Index are measured on a monthly basis from January 1987 to January 2023:
+
+```{r Data Import. Time-Series Plot, and Histogram, echo=FALSE}
+BostonHousePriceIndex <- read.csv("BostonHomePriceNSAIndexData.csv")
+BHPI <- ts(BostonHousePriceIndex$BOXRSA, start(1987,1), frequency = 12)
+(plot(BHPI))
+(hist(BHPI))
+```
+
+An initial analysis of the time-series plot suggests that over the course of time between January 1987 and January 2023, the Boston House Price Index has steadily increased, with a drop off in the value of the Boston House Price Index occurring somewhere approximately in the 1995 – 1998 range. During the 1990s in Boston, there appeared to be an increase in price volatility and sharp differences in prices behavior, resulting in a very large housing price boom in the Boston housing market. To add to the housing price boom, the United States economy was in a recession period during the 1990s. Once the 1990s concluded and Year 2K commenced, the Boston House Price Index stabilized and has increased since, signifying price restoration and reduced price volatility in the Boston housing market.
+
+The histogram indicates the data is negatively skewed, with the vast majority of its values lying in the 0 to 100 range. Transformations to the data must be performed in order to normalize the data and make it more suitable for further analysis. To account for this negative skew in the data, the *natural logarithm* ($\ln()$) of the Boston House Price Index data is taken, where the only adjustment occuring is along the y-axis, where the scale of the range of the data now ranges from $0$ to $\text{+}\infty$:
+
+```{r log(BHPI) Time-Series Plot,echo=FALSE}
+logBHPI <- log(BHPI)
+plot(logBHPI)
+```
+
+A quick observation of the adjusted time-series plot above corroborates that over the course of time in the Boston housing market, the Boston House Price Index has steadily increased, with a drop off occurring in the 1990s due to local housing market and macroeconomic conditions. The first difference of the natural logarithm of the Boston House Price Index must be taken in order to account for in order to remove the effects of lags that occur in the dataset provided. In essence, the first difference of the natural logarithm of the Boston House Price Index produces the growth rate of the Boston House Price Index and expresses this rate in decimal format.
+
+Summary statistics and the standard deviation of the growth rate are provided:
+
+
+```{r Summary Statistics, echo=FALSE}
+diffBHPI <- diff(logBHPI)
+(summary(diffBHPI))
+(sd(diffBHPI))
+```
+With the growth rate over this period of time averaging out to $0.0034$, or about $0.34\text{%}$, this shows that the Boston House Price Index that, on average, over this course of time from January 1978 to January 2023, the average growth in the Boston House Price Index is $0.34\text{%}$. The standard deviation of $0.0066$, or about $0.66\text{%}$, suggests that the growth rate of the Boston House Price Index deviates from the mean value of $0.29\text{%}$ about $0.66$ percentage points, which is a relatively small level of variability over this length of time, signifying security in the Boston housing market.
+
+
+### Growth Rate Analysis
+
+A more accurate representation of the growth rate over this extensive period of time is to determine the average growth rate, which can be found using the following formula:
+
+$$
+
+\text{Average Growth Rate} = (1 + \ln(BHPI)^{12})-1
+
+$$
+
+Summary statistics for the average growth rate of the Boston House Price Index is provided along with a histogram and density histogram analyzing the distribution of the Boston House Price Index:
+
+```{r Average Growth Rate Statistics, echo=FALSE}
+average_growth_rate <- ((1+diffBHPI)^12)-1
+(summary(average_growth_rate))
+(hist(average_growth_rate))
+(hist(average_growth_rate, freq = FALSE))
+
+```
+
+Analyzing the summary statistics, the average growth rate of the Boston House Price Index over the course of time from January 1978 to January 2023 is $0.044$, or about $4.4\text{%}$, with a standard deviation of $0.082$, or about $8.2\text{%}$. The histograms show that the distribution of the data appears to be approximately Normal, but the argument can be made that the data is slightly negatively skewed. The average growth rate appears to fall somewhere between $-0.05\text{%}$ and $0.15\text{%}$.
+
+Now, a 1-Sample t-Test must be conducted to determine whether the average growth rate is different from the value 0:
+
+$$
+
+\text{H}_{0}: \mu = 0
+\\
+\text{H}_{A}: \mu \neq 0
+
+$$
+
+```{r 1-Sample T-Test}
+t.test(average_growth_rate, mu = 0)
+```
+
+Observing the results from the 1-Sample t-Test, the p-value of $2.2e^{-16}$ suggests that at the 95% Confidence level, which will be the Confidence Level that is assumed going forward, that the average growth rate differs from 0.
+
+
+### Predicting the Boston Housing Price Index (BHPI)
+
+Now we wish to produce a model that predicts the value of BHPI using the fact that the data has a trend associated to it. A trend in time-series analysis is defined to be a smooth and slow evaluation of the data that appears to be headed in one direction over the course of time. The time series plot of the Boston House Price Index suggests that from January 1978 to January 2023, there appears to be a positive trend of the data, whereas time progresses, the value of the Boston House Price Index increases over time:
+
+```{r Simple Model, echo=FALSE}
+model <- dynlm(BHPI~trend(BHPI))
+summary(model)
+```
+
+The output above shows that the trend coefficient has a value of $5.6568$, meaning that for a one-year increase in the `trend(BHPI)` variable, on average, the BHPI increases by $5.6568$ points. The `trend(BHPI)` coefficient is statistically significant at the 5% significance level, since its p-value of $2.2e^{-16}$ is significantly less than the significance level $\alpha$ of 0.05. Its high test statistic of $54.14$ further corroborates the claim that `trend(BHPI)` is a statistically significant variable. It can be concluded from an overarching perspective that there is a long-term trend with the data.
+
+A linear model attempting to fit this data is provided:
+
+```{r Fitted Linear Model, echo=FALSE}
+logmodel <- dynlm(logBHPI~trend(logBHPI))
+(summary(logmodel))
+(ts.plot(logBHPI, logmodel$fitted.values, col = c("black", "red")))
+```
+
+A Durbin-Watson Test shall now be performed on the model that utilizes the trend of the natural logarithm of BHPI to assess whether the true autocorrelation values are greater than $0$. The following hypotheses are tested:
+
+$$
+\text{H}_{0}: \rho = 0
+\\
+\text{H}_{A}: \rho > 0
+$$
+
+```{r Durbin-Watson Test, echo=FALSE}
+dwtest(logmodel)
+```
+
+The output above shows that the p-value of $2.2𝑒^{−16}$ is once again significantly less than $\alpha$, which provides enough evidence to reject the Null Hypothesis and conclude that the true autocorrelation value is greater than 0 and that there appears to be autocorrelation among the residuals, which is a violation of one of the major assumption of regression. With this in mind, the analysis will carefully continue, keeping in mind that the residuals are highly correlated among each other.
+
+Using a linear model to fit the growth and the trend found in the natural logarithm of BHPI is unreasonable here since the growth of this variable does not appear to be linear. The growth rate of the $\ln(BHPI)$ appears to be exponential, so a new exponential growth model will be used to determine this growth rate for the response variable `BHPI`:
+
+```{r Exponential Growth Model, echo=FALSE}
+GrowthFit <- exp(logmodel$fitted.values)
+ts.plot(BHPI, GrowthFit, col = c("black", "red"))
+```
+
+Although the exponential growth model that GrowthFit provides fits the data slightly better, it still remains a very rough estimate in an attempt to plot the average growth rate of $\ln(BHPI)$ over time while accounting for this trend. A more accurate exponential model must be constructed to better fit the data. 
+
+The mean of the `BHPI` over the January 1978 to January 2023 timeframe is approximately $141.89$ points. However, time must be considered in the average value of `BHPI`, so an appropriate *Moving Average* must be determined.
+
+The process for selecting the appropriate Moving Average term consists of trial-and-error, and although tedious, a Moving Average Model of Order 50 appears to be the appropriate Moving Average term. 
+
+A plot of this Moving Average term and the `ln(BHPI)` is provided, with the \textcolor{red curve}{red} being the Moving Average term and the black curve is `ln(BHPI)`:
+
+```{r Moving Average Order 50 Model, echo=FALSE}
+ma50 <- ma(logBHPI, 50)
+ts.plot(logBHPI, ma50, col = c("black", "red"))
+```
+
+Suppose we wish to construct a Holt-Winters Filtering Model that predicts the `ln(BHPI)` trend better than the Moving Average Model of Order 50. We will see later in the report that a Moving Average of Order 50 is actually *not* as great of an estimate as it initially appears to be, so the **Holt-Winters Filtering Model** seeks to further improve the accuracy behind predicting the exponential growth that appears using $\ln(BHPI)$. 
+
+Using $\alpha = 0.15$, where $\alpha$ is the *Holt-Winters Parameter*, Holt-Winters Filtering Model is provided, \textcolor{red curve}{red} indicating the Holt-Winters Filtering Model and the and the black curve is `ln(BHPI)`:
+
+```{r Holt-Winters Model, echo=FALSE}
+(sem <- HoltWinters(x = logBHPI, alpha = 0.15, beta=FALSE, gamma = FALSE))
+plot(sem)
+```
+
+### Autocorrelation and Partial Autocorrelation Analysis
+
+We now advance to analyzing the autocorrelation and Partial Autocorrelation functions of the first difference in the ln(BHPI). 
+
+Autocorrelation and Partial Autocorrelation plots are provided:
+
+```{r Autocorrelation and Partial Autocorrelation Plots, echo=FALSE}
+difflogBHPI <- diff(logBHPI)
+(Acf(difflogBHPI, 500))
+(Pacf(difflogBHPI))
+```
+
+Looking at the Autocorrelation plot first, the terms exponentially approach to $0$ only after about $400$ lags, suggesting that a Moving Average Model of Order $400$ might be the statistically most accurate Moving Average model to predict the values of the first difference of `ln(BHPI)`.
+
+Analyzing the Partial Autocorrelation plot, which requires significantly less lags than the Autocorrelation plot, it exponentially declines to 0, with this plot suggesting that the model is an Autoregressive Model of Order $8$. The data is not stationary until the first difference of the `ln(BHPI)` is taken, which then it becomes stationary.
+
+A Box Test on monthly data shall now be performed, which tests the following hypotheses:
+
+$$
+
+\text{H}_{0}: \text{Residuals are White Noise}
+\\
+\text{H}_{A}: \text{Residuals are NOT White Noise}
+$$
+
+We wish to prove that the residuals are white noise, so in an unusual turn of events, we wish to prove the Null Hypothesis ${\text{(H}_{0})}$ correct:
+
+```{r Box-Ljung Test, echo=FALSE}
+Box.test(difflogBHPI, 12, "Lj")
+```
+
+The Ljung, or Chi-Squared test statistic ($\chi^{2}$) of $1388.8$ and a p-value of $2.2e^{-16}$ leads us to *reject* the Null Hypothesis ($\text{H}_{0}$) and conclude that the residuals are **not** White Noise, meaning the model we 
+estimated thus far has been a poor estimation.
+
+
+## Autoregressive Integrated Moving Avearge (ARIMA) Model Analysis
+
+Another consideration to note is whether or not the data is *weakly stationary*. Three separate ARIMA models have been generated, named `Arima1`, `Arima2`, and `Arima3`. `Arima1` consists of the $8$ Autoregressive terms the Partial Autocorrelation plot suggested the model should incorporate, `Arima2` has the $8$ Autoregressive terms and $1$ Moving Average term, and `Arima3` consists of $8$ Autoregressive terms and $2$ Moving Average terms.
+
+To determine whether or not these ARIMA models are weakly stationary, their plots must be provided:
+
+```{r Arima1 Weakly Stationary Plot, echo=FALSE}
+Arima1 <- Arima(difflogBHPI, c(8,0,0))
+Arima2 <- Arima(difflogBHPI, c(8,0,1))
+Arima3 <- Arima(difflogBHPI, c(8,0,2))
+
+(plot(Arima1, main = "Arima1 Model Plot"))
+(plot(Arima2, main = "Arima2 Model Plot"))
+(plot(Arima3, main = "Arima3 Model Plot"))
+```
+
+The plot for `Arima1` shows that the data is weakly stationary since all of the Autoregressive terms, represented by the black points, lie within the circle.
+
+The plot for `Arima2` also shows that the data is weakly stationary since the Moving Average and Autoregressive terms, both represented by black points, lie within the circle.
+
+Similar to `Arima1` and `Arima2`, the model `Arima3` is also weakly stationary, with its Moving Average and Autoregressive terms lying within their respective circles.
+
+```{r ARIMA Model Summaries,echo=FALSE}
+
+(summary(Arima1))
+cat("\n\n\n")
+(summary(Arima2))
+cat("\n\n\n")
+(summary(Arima3))
+
+```
+A summary table for `Arima1`, `Arima2`, and `Arima3` regarding their measures is provided:
+
+| Model   | Autoregressive Terms | Moving Average Terms | Akaike Information Criteria (AIC) | Bayesian Information Criteria (BIC) |
+|---------|----------------------|---------------------|----------------------------------|---------------------------------------|
+| `Arima1`| 8                    | 0                   | `r Arima1$aic`                   | `r Arima1$bic`                        |
+| `Arima2`| 8                    | 1                   | `r Arima2$aic`                   | `r Arima2$bic`                        |
+| `Arima3`| 8                    | 2                   | `r Arima3$aic`                   | `r Arima3$bic`                        |
+{: .table .table-responsive .table-bordered .center}
+
+From this data table, two of these models shall be selected for further comparison and to run forecasts on them. The two models to use for further analysis would be `Arima1` and `Arima3`, since their AIC and BIC values each are better than `Arima2`’s. Before forecasting, however, it is necessary to divide the data into Training and Testing datasets, where the Training dataset will consist of about 90%, or `{r round(0.90 * nrow(BostonHousePriceIndex), 0)}`, of the `{r nrow(BostonHousePriceIndex)}` observations and the remaining 10%, or `{r round(0.10 * nrow(BostonHousePriceIndex), 0)}` observations, of the dataset being in the Testing dataset. The Training dataset serves to build the ARIMA models and the Testing dataset serves to validate the accuracy of the ARIMA models. 
+
+Once the data is divided in the Training and Testing datasets, accurate forecasts can be produced. However, certain Hypothesis Tests must be conducted to ensure that the residuals sum to $0$ and are White Noise as well as to determine whether the value within the forecast of the ARIMA model are efficient.
+
+The first test to perform is a t-Test evaluation of `Arima1`’s residuals and `Arima3`’s residuals to determine whether or not they sum to $0$. The following hypotheses are tested:
+
+$$
+\text{H}_{0}: \text{Residuals} = 0
+\\
+\text{H}_{A}: \text{Residuals} \neq 0
+$$
+
+```{r Arima1 & Arima3 Training & Testing, echo=FALSE}
+
+set.seed(44165363)
+
+# Arima1
+Arima1TrainingIndices <- sample(1:380, size = 30, replace = FALSE)
+Arima1TestingIndices <- Arima1TrainingIndices  # Use the same indices for testing
+Arima1Training <- Arima(difflogBHPI[Arima1TrainingIndices], c(8, 0, 0))
+Arima1Testing <- Arima(difflogBHPI[Arima1TestingIndices], c(8, 0, 0))
+
+# Arima3
+Arima3TrainingIndices <- Arima1TrainingIndices  # Use the same indices as Arima1 for training
+Arima3TestingIndices <- sample(1:380, size = 37, replace = FALSE)
+Arima3Training <- Arima(difflogBHPI[Arima3TrainingIndices], c(8, 0, 2))
+Arima3Testing <- Arima(difflogBHPI[Arima3TestingIndices], c(8, 0, 2))
+
+# t-Test: Arima1 and Arima3
+t.test(Arima1$residuals)
+cat("\n\n\n")
+t.test(Arima3$residuals)
+```
+Evaluating the results of these t-Tests for residuals of `Arima1` and `Arima3`, their p-values of $0.9228$ and $0.9201$, respectively, show that their respective residuals do indeed equal to $0$, which is what is desired for this test.
+
+The second test to run before forecasting is the Box Test, which intends to analyze whether or not the residuals are White Noise. The following hypotheses are tested in the Box Test:
+
+$$
+\text{H}_{0}: \text{Residuals are White Noise}
+\\
+\text{H}_{A}: \text{Residuals are NOT White Noise}
+$$
+```{r Arima1 & Arima3 Box Test for Residuals}
+Box.test(Arima1$residuals, 12, "Lj")
+cat("\n\n\n")
+Box.test(Arima3$residuals, 12, "Lj")
+```
+Analyzing the Box Test results of `Arima1`’s and `Arima3`’s residuals, their respective p-values of $0.9898$ and $0.9995$ show that their respective residuals are White Noise, which is what we want to conclude from this particular Hypothesis Test.
+
+Now it is time to use the Test data for `Arima1` and `Arima3` to compare Model Performance:
+```{r Arima1 & Arima3 Model Summaries w/ Test Data, echo=FALSE}
+summary(Arima1Testing)
+cat("\n\n\n")
+summary(Arima3Testing)
+```
+Given these outputs, we find that the RMSE values of `Arima1` and `Arima3` using the Testing datasets are approximately $0.00484$ and $0.00485$, respectively, and their respective MAE values are approximately $0.00367$ and $0.00416$. 
+
+The Efficiency Test must now be performed on the `Arima1` and `Arima3` models to effectively determine whether the parameters `Arima1$fitted` or `Arima3$fitted` fitted values sum to $0$ and are therefore efficient. The hypotheses to consider for this particular test are:
+
+$$
+\text{H}_{0}: \text{The Fitted Values for `Arima1`/`Arima3` is Efficient}
+\\
+\text{H}_{A}: \text{The Fitted Values for `Arima1`/`Arima3` is NOT Efficient}
+$$
+```{r Efficiency Test}
+EfficiencyTest1 <- lm(Arima1$residuals~Arima1$fitted)
+EfficiencyTest2 <- lm(Arima3$residuals~Arima3$fitted)
+
+summary(EfficiencyTest1)
+cat("\n\n\n")
+summary(EfficiencyTest2)
+
+```
+Examining the outputs provided, the Efficiency Tests for `Arima1`’s and `Arima3`’s residuals yield p-values of $0.915$ and $0.905$, respectively. Since we *fail* to reject the Null Hypothesis ($\text{H}_{0}$) in this test, we can conclude that the value of their parameters (`Arima1$fitted` and `Arima3$fitted`) are nonzero and are therefore efficient. 
+
+A 3-year (i.e. 36 month/time-period) forecast at the 95% Confidence Levels for `Arima1` and `Arima3` is provided, as well as their forecasted values:
+
+```{r Arima1 & Arima3 Forecast}
+Forecast1 <- forecast(Arima1, 36, 95)
+plot(Forecast1)
+print(Forecast1)
+Forecast2 <- forecast(Arima3, 26, 95)
+plot(Forecast2)
+print(Forecast2)
+```
+
+The 95% Confidence Level (the gray shaded area) suggests that the forecasted values of the first difference of $\ln(BHPI)$ projected 36 months (3 years) ahead will be decreasing and eventually leveling off at around $0.002$. 
+
+Note that the forecasted values are extremely similar between `Arima1` and `Arima3`; the only difference between them is the additional $2$ Moving Average terms found in `Arima3`, and it seems to have very little impact on the forecasted values.
+
+Examining the mean, lower, and upper forecasted values for both `Arima1` and `Arima3` at the 95% Confidence Level, the black curve represents the time-series plot of the mean 95% Confidence values for the models, the \textcolor{blue curve}{blue} blue curve represents the time-series plot of the lower 95% Confidence values for the model, and the \textcolor{red curve}{red} represents the time-series plot of the upper 95% Confidence values for the model:
+
+```{r More Forecast Plots,echo=FALSE}
+(ts.plot(Forecast1$mean, Forecast1$lower, Forecast1$upper, col = c("black", "blue", "red"), main = "Arima1 Forecast"))
+(ts.plot(Forecast2$mean, Forecast2$lower, Forecast2$upper, col = c("black", "blue", "red"), main = "Arima3 Forecast"))
+(Forecast1Table <- data.frame(Forecast1$lower, Forecast1$mean, Forecast1$upper))
+(Forecast2Table <- data.frame(Forecast2$lower, Forecast2$mean, Forecast2$upper))
+```
+Another Hypothesis Tests to run for Model3 is the Coefficient Test, which is a Hypothesis Test that seeks to determine which Autoregressive and/or Moving Average components of a model are statistically significant coefficients. Running the Coefficient Test in R for `Arima1` and `Arima3` yields the following:
+
+```{r Arima1 & Arima3 Coefficient Test,echo=FALSE}
+
+coeftest(Arima1)
+cat("\n\n\n")
+coeftest(Arima3)
+```
+For `Arima1` at the $0.05$ Significance Level ($\alpha = 0.05$), the `ar1`, `ar2`, `ar3`, `ar4`, `ar6`, and `ar7` Autoregressive Terms are all statistically significant coefficients since their individual p-values are less than $\alpha$. The `ar5` and `ar8` Autoregressive Terms, however, are *not* statistically significant coefficients for the `Arima1` model at the $0.05$ Significance Level. This suggests that for this model, `Arima1` should be updated to include only $6$ Autoregressive Terms.
+
+For `Arima3` at the $0.05$ Significance Level ($\alpha = 0.05$), the `ar2`, `ar3`, `ar5`, `ar6`, and `ar8` Autoregressive Terms and the `ma1` Moving Average Term are all statistically significant coefficients since their individual p-values are less than $\alpha$. The `ar1`, `ar4`, and `ar7` Autoregressive Terms and the `ma2` Moving Average Term, however, are *not* statistically significant coefficients for the `Arima3` model at the $0.05$ Significance Level. This suggests that for this model, `Arima1` should be updated to include only $5$ Autoregressive Terms and $1$ Moving Average Term.
+
+Suppose we want to construct another ARIMA model, `Arima4`, but uses the command `auto.arima()` to allow $R$ to automatically determine the best ARIMA Model components, specifically the number of Autoregressive and Moving Average Terms. In addition, the **Akaike Information Criteria (AIC)** value will be the Information Criteria that $R$ will have to optimize on in the construction of this model. How does it perform?
+
+```{r Arima4, echo=FALSE}
+Arima4 <- auto.arima(logBHPI, ic="aic")
+summary(Arima4)
+```
+The best ARIMA model $R$ has generated given that AIC is fully optimized includes $0$ Autoregresive Terms, $2$ *Degrees of Differencing*, and $4$ Moving Average Terms. The AIC of `Arima4` is $-3531.12$, the BIC value is $-3506.73$, the RMSE is approximately $0.004$, and the *Mean Absolute Value (MAE)* is $0.0029$. 
+
+With `auto.arima` in `Arima4`, **Backward Stepwise Procedures** to produce the best model and **Seasonal Adjustments** were taken into consideration by default. What if these aspects were *not* considered? `Arima5` explores this possibility:
+
+```{r Arima5, echo=FALSE}
+Arima5 <- auto.arima(logBHPI, stepwise = FALSE, seasonal = FALSE)
+summary(Arima5)
+
+```
+Similar to `Arima4`, `Arima5` using `auto.arima()` and specifying the `stepwise` and `seasonal` parameters to `FALSE` includes $0$ Autoregresive Terms, $2$ *Degrees of Differencing*, and $4$ Moving Average Terms. This suggests that the data is *not* seasonal over this timeframe (January 1987 - January 2023).
+
+Running Box Tests on `Arima4` and `Arima5` tests whether or not their residuals are White Noise:
+
+$$
+\text{H}_{0}: \text{Residuals are White Noise}
+\\
+\text{H}_{A}: \text{Residuals are NOT White Noise}
+$$
+```{r Arima4 & Arima5 Box Test, Coefficient Test, and Plots}
+Box.test(Arima4$residuals, 12, "Lj", 5)
+cat("\n\n\n")
+Box.test(Arima5$residuals, 12, "Lj", 5)
+```
+Since *both* `Arima4` and `Arima5` have p-values that are greater than the Significance Level $\alpha$ ($0.05$), the Null Hypothesis is true, confirming that the residuals are White Noise. This suggests that despite `auto.arima()`'s efforts to produce an optimal ARIMA Model, it failed to do so. 
+
+
+```{r Arima4 & Arima5 Coefficient Test and Plots,echo=FALSE}
+
+# Coefficient Tests
+coeftest(Arima4)
+cat("\n\n\n")
+coeftest(Arima5)
+cat("\n\n\n")
+
+# Plots
+(plot(Arima4, main = "Arima4 Model"))
+(plot(Arima5, main = "Arima5 Model"))
+```
+The statistically significant terms at the 5% Significance Level ($\alpha = 0.05$) for `Arima4` and `Arima5` are `ma1`, `ma3`, and `sma1`. The statistically significant terms at the 5% Significance Level ($\alpha = 0.05$) for `Arima5` are `ma1`, `ma3`, and `ma4`. This further corroborates the claim that `auto.arima()` did *not* produce the most optimized ARIMA model possible.
+
+The plots of `Arima4` and `Arima5` show that all terms in the model are weakly stationary, as all black dots lie within the circle.
+
+### Model Evaluation
+
+I will be using *both* the AIC and BIC in determining which ARIMA Model I will use to forecast the BHPI. The model I chose to select is `Arima1`. This model yielded both the lowest AIC (`{r AIC(Arima1)}`) and BIC (`{r BIC(Arima1)}`) values, as well as maintaining a low RMSE and MAE compared to the other models. However, I will also need `Arima3` later on in the analysis, so the models I chose for forecasting and predicting are `Arima1` and `Arima3`.
+
+#### `Arima1` Model Evaluation
+
+With the Training and Test datasets already completed in a previous step, now it is time to apply a forecast to the trained `Arima1` model:  
+
+```{r Arima1 Model Evaluation, echo=FALSE}
+
+set.seed(16784535)
+
+Model1Training <- Arima(Arima1TrainingIndices, c(8,0,0))
+summary(Model1Training)
+cat("\n\n\n")
+Model1Forecast <- Arima(Arima1TestingIndices, model = Arima1)
+summary(Model1Forecast)
+
+```
+The results are in, and they aren't looking so hot...$AIC$ and $BIC$ values are positive, where they should be negative. MAE will be artificially higher due to the smaller sample size being analyzed, but RMSE values are large also.
+
+Are the mean of the residuals equivalent to 0?
+
+```{r t-Test Arima4, echo=FALSE}
+t.test(Model1Forecast$residuals)
+```
+With a p-value of $0.1747$, it is greater than the Significance Level $\alpha$ ($0.05$), leading us to conclude that the Null Hypothesis *cannot* be rejected, showing that the true mean of the residuals is equivalent to $0$. This is promising, but still needs some fine-tuning. 
+
+The Box Test will confirm whether or not the residuals are White Noise:
+
+```{r Arima4 Box Test, echo=FALSE}
+Box.test(Model1Forecast$residuals, 12, "Lj")
+```
+The p-value of $0.0145$ is less than the Significance Level $\alpha$ ($0.05$), which means we reject the Null Hypothesis and conclude that the residuals are white noise. This could be an issue and should be investigated further. 
+
+An Efficiency Test is required now. It should be noted that these conclusions about the Model thus far are due to the very small sample size in `Model1Forecast`. An **Efficiency Test** takes a dependent variable ($y$), in this case the residuals of `Model1Forecast`, and an independent variable ($x$), in this case the fitted values of `Model1Forecast`, to determine if the residuals can be predicted by the fitted values (i.e. can $y$ be predicted by $x$).
+
+```{r Efficiency Test Model1Forecast, echo=FALSE}
+EfficiencyModel1 <- lm(Model1Forecast$residuals~Model1Forecast$fitted)
+summary(EfficiencyModel1)
+```
+The predictor `Model1Forecast$fitted` has a p-value of $0.00875$, which is less than the specified Signifance Level ($\alpha$) of $0.05$, thereby suggesting to reject the Null Hypothesis ($\text{H}_0$) and conclude that the predictor `Model1Forecast$fitted` is a statistically significant predictor in predicting `Model1Forecast`’s residuals.
+
+A **Linear Hypothesis Test** (`lht`) must be performed on `Model1Forecast$fitted` to determine if a *Restricted Model* is better in predicting the residuals in `Model1Forecast` than the model that uses the `Model1Forecast$fitted` predictor. The following hypotheses are tested:
+
+$$
+\text{H}_{0}: \text{Restricted Model Predicts Residuals in `Model1Forecast` Better than Full Model}
+\\
+\text{H}_{A}: \text{Restricted Model DOES NOT Predict Residuals in `Model1Forecast` Better than Full Model}
+$$
+```{r LHT Model1Forecast}
+lht(EfficiencyModel1, "(Intercept)=Model1Forecast$fitted")
+```
+With a p-value of $0.003347$, this is less than the Significance Level $\alpha$ ($0.05$), which allows us to reject the Null Hypothesis ($\text{H}_{0}$) and conclude that the `Model1Forecast$fitted` predictor predicts the residuals better.
+
+#### `Arima3` Model Evaluation
+
+Now `Arima3` will be used to forecast and predict just like `Arima1`. The Training and Test data are already defined.
+
+```{r Arima3 Model Evaluation, echo=FALSE}
+set.seed(951263657)
+
+Model3Training <- Arima(Arima3TrainingIndices, c(8,0,2))
+summary(Model3Training)
+cat("\n\n\n")
+Model3Forecast <- Arima(Arima3TestingIndices, model = Arima3)
+summary(Model3Forecast)
+```
+The results are in, and they aren't looking so hot, either...$AIC$ and $BIC$ values are positive, where they should be negative. MAE will be artificially higher due to the smaller sample size being analyzed, but RMSE values are large also. In fact, this did slightly *worse* than the `Model1Forecast`. Yikes.
+
+Are the mean of the residuals here equivalent to 0?
+
+```{r Model3Forecast t-Test, echo=FALSE}
+t.test(Model3Forecast$residuals)
+```
+With a p-value of 0.2358, this is significantly greater than the Significance Level $\alpha$ ($0.05$), so the Null Hypothesis **cannot** be rejected and it can be concluded that the true mean of the residuals is equivalent to 0. That's a good sign, at least.
+
+Are the residuals White Noise, though?
+
+```{r Model3Forecast Box Test, echo=FALSE}
+Box.test(Model3Forecast$residuals, 12, "Lj")
+
+```
+The p-value of $0.01707$ is less than the Significance Level $\alpha$ ($0.05$), which allows us to reject the Null Hypothesis and conclude that the residuals in this instance are **not** White Noise. This is a better result when comparing this to `Model1Forecast`.
+
+Now it is time to run an Efficiency Test -- can the residuals can be predicted by the fitted values (i.e. can $y$ be predicted by $x$) for `Model3Forecast`?
+
+```{r LHT Model3Forecast, echo=FALSE}
+EfficiencyModel2 <- lm(Model3Forecast$residuals~Model3Forecast$fitted)
+summary(EfficiencyModel2)
+cat("\n\n\n")
+lht(EfficiencyModel2, "(Intercept)=Model3Forecast$fitted")
+```
+The predictor `Model3Forecast$fitted` has a p-value of $0.000102$, which is significantly less than the Significance Level $\alpha$ ($0.05$), thereby suggesting to reject the Null Hypothesis and conclude that the predictor `Model2Forecast$fitted` is a statistically significant predictor in predicting `Model2Forecast`’s residuals.
+
+The Linear Hypothesis Test ran shows that a Restricted Model in this case would **not** be better in predicting the residuals of `Model3Forecast` because the p-value of this test is $6.876e^{-5}$, which is significantly less than the Significance Level $\alpha$ ($0.05$), allowing us to reject the Null Hypothesis ($\text{H}_{0}$) in this context and come to this conclusion.
+
+### Residual Analysis
+
+Suppose the variable `e1` is defined to be `Model1Forecast$residuals` and `e2` is defined to be `Model3Forecast$residuals`. Then the square of the residuals of these models would simply inherit the names `e1sq` and `e2sq`, respectively.
+
+```{r Model1Forecast & Model3Forecast Residual Means & Squares, echo=FALSE}
+e1 <- Model1Forecast$residuals
+e2 <- Model3Forecast$residuals
+e1sq <- e1^2
+e2sq <- e2^2
+mean(e1)
+mean(e1sq)
+mean(e2)
+mean(e2sq)
+```
+The mean value of the residuals in `Model1Forecast` is `{r mean(e1)}`, with its square being `{r mean(e1sq)}`. The mean value of the residuals in `Model2Forecast` is `{r mean(e2)}`, with its square being `{r mean(e2sq)}`.
+
+Now suppose we wish to run a 1-Sample t-Test on the residuals of `Model1Forecast` and `Model2Forecast`, respectively:
+
+```{r Residual t-Tests, echo=FALSE}
+t.test(e1)
+cat("\n\n\n")
+t.test(e2)
+```
+For *both* `Model1Forecast`'s and `Model3Forecast`'s residuals, the p-value is greater than the Significance Level $\alpha$ ($0.05$), so we fail to reject the Null Hypothesis in both cases here and conclude that the true mean of the residuals is **not** $0$.
+
+Are each of these residuals White Noise? A Box Test determines this:
+
+```{r Residuals Box Test, echo=FALSE}
+Box.test(e1, 12, "Lj")
+Box.test(e2, 12, "Lj")
+```
+For *both* `Model1Forecast`'s and `Model3Forecast`'s residuals, the p-value is less than the Significance Level $\alpha$ ($0.05$), so we reject the Null Hypothesis in both cases here and conclude that residuals are **not** White Noise.
+
+Running an Efficiency Test on both these models' residuals will either confirm or deny if the fitted values for the models are statistically significant predictors in predicting the residuals:
+
+```{r Residual Efficiency Test, echo=FALSE}
+eft <- lm(e1~Model1Forecast$fitted)
+eft2 <- lm(e2~Model3Forecast$fitted)
+summary(eft)
+cat("\n\n\n")
+summary(eft2)
+```
+For *both* `Model1Forecast`'s and `Model3Forecast`'s residuals, the p-value is less than the Significance Level $\alpha$ ($0.05$), so we reject the Null Hypothesis in both cases here and conclude that the fitted values for the models are statistically significant predictors in predicting the values of their residuals.
+
+Finally, a Linear Hypothesis Test must be performed on each of the models' residuals to confirm or deny that a Restricted Model could be a stronger predictor in predicting the residuals compared to the fitted values:
+
+```{r Residuals LHT}
+lht(eft, c("(Intercept)", "Model1Forecast$fitted"))
+cat("\n\n\n")
+lht(eft2, c("(Intercept)", "Model3Forecast$fitted"))
+```
+For *both* `Model1Forecast`'s and `Model3Forecast`'s residuals, the p-value is less than the Significance Level $\alpha$ ($0.05$), so we reject the Null Hypothesis in both cases here and conclude that the Restricted Model does **not** predict the values of the residuals better than the fitted values.
+
+Assume that there is a linear relationship shared between the residuals of `Model1Forecast` and `Model3Forecast`. The variable name `linear` takes the difference between `Model1Forecast`’s residuals and `Model3Forecast`’s residuals and establishes a linear relationship between the two. A 1-Sample t-Test will now be conducted determining if the difference between the residuals found between `Model1Forecast` and `Model3Forecast` differs from the value of 0:
+
+```{r Model1Forecast - Model3Forecast Residuals t-Test, echo=FALSE}
+linear <- e1 - e2
+t.test(linear)
+```
+The 1-Sample t-Test shows that there is **no** difference between the residuals of `Model1Forecast` and `Model3Forecast` since the p-value of $1$ is significantly greater than the Significance Level $\alpha$ ($0.05$). The difference between these residuals is $0$.
+
+Another consideration comes to mind when the residuals are squared and then subtracted from each other. Using the variable name `quad` to identify the difference of the squares of the residuals between `Model1Forecast` `and Model3Forecast`, a 1-Sample t-Test will determine if the difference between the *squares* of the residuals of `Model1Forecast` and `Model3Forecast` is non-zero:
+
+```{r Model1Forecast - Model3Forecast Squared Residuals t-Test,echo=FALSE}
+quad <- e1sq - e2sq
+t.test(quad)
+```
+The 1-Sample t-Test shows that there is **no** difference between the squared residuals of `Model1Forecast` and `Model3Forecast` since the p-value of $0.4278$ is significantly greater than the Significance Level $\alpha$ ($0.05$). The difference between these squared residuals is also $0$.
+
+### Analyzing Trends in the Data
+
+It is now time to execute a **Unit Root Dickey Fuller Test** on the variable $\ln(BHPI)$, assuming that there is a trend in the data and $AIC$ is the selection criterion used. The following hypotheses are tested:
+
+$$
+\text{H}_{0}: \text{There is a Unit Root}
+\\
+\text{H}_{A}: \text{There is NOT a Unit Root}
+$$
+```{r Unit Root Dickey Fuller Test}
+t1 <- ur.df(logBHPI, "trend", 12, "AIC")
+summary(t1)
+```
+Examining the output, the test statistic of the `z.lag.1` predictor is $-2.512$, and at the 5% Significance Level, `tau3` is $-3.42$. Because our Test Statistic ($-2.512$) is **not** as extreme than the `tau3` test statistic ($-3.42$) at the 5% Significance Level ($\alpha = 0.05$), we fail to reject the Null Hypothesis and conclude that there is a Unit Root, meaning that this relationship is at least $I(1)$. 
+
+Now we take the first difference of $\ln(BHPI)$ and adjust the `trend` argument in the `ur.df` command to `drift`, which includes a constant term and plotting the first difference of the $\ln(BHPI)$ would show no trend anyway:
+
+```{r Unit Root Dickey Fuller Test w/ Drift, echo=FALSE}
+t2 <- ur.df(diff(logBHPI), "drift", 12, "AIC")
+summary(t2)
+```
+
+Examining the output, the test statistic for `z.lag.1` now is $-3.127$ and at the 5% Significance Level, `tau2` is $-2.87$. Because our test statistic ($-3.127$) is more extreme than the `tau2` test statistic ($-2.87$) at 5% Significance Level ($\alpha = 0.05$), this allows us to reject the Null Hypothesis and conclude here that there is **not** another Unit Root, meaning the relationship remains at $I(1)$.
+
+Does the $I(2)$ relationship appear if a *second* difference is taken?
+
+```{r r Unit Root Dickey Fuller Test w/ Drift for Second Difference of ln(BHPI), echo=FALSE}
+t3 <- ur.df(diff(diff(logBHPI)), "drift", 12, "AIC")
+summary(t3)
+```
+Examining the output, the test statistic for `z.lag.1` now is $-11.188$ and at the 5% Significance Level, `tau2` is $-2.87$. Because our test statistic ($-11.188$) is significantly more extreme than the `tau2` test statistic ($-2.87$) at 5% Significance Level ($\alpha = 0.05$), this allows us to reject the Null Hypothesis and conclude here that there is **not** another Unit Root here as well, meaning the relationship remains at $I(1)$.
+
+### Model Selection
+
+I am choosing `Arima1` as the model to forecast the BHPI, as the $AIC$ for this ARIMA model (`{r AIC(Arima1)}`) was the lowest among the five models created. From this model, we wish to run an ARIMA analysis but include $2$ integrated terms, meaning that the ARIMA model is integrated twice. This model would now be an ARIMA model where it uses the $\ln(BHPI)$ but has $8$ Autoregressive terms, $0$ Moving Average terms, and is integrated twice ($2$).
+
+```{r Plotting Arima1 w/ ln(BHPI), echo=FALSE}
+Model4 <- Arima(logBHPI, c(8,2,0))
+Forecast4 <- forecast(Model4, h = 36, level = 0.95)
+plot(Forecast4)
+```
+The plot here identifies that over a forecast that projects $\ln(BHPI)$ 36 time periods ahead, the data appears to trend slightly down over time. The \textcolor{gray shaded area}{gray} shaded area around the \textcolor{blue line showing the point forecast values}{blue} indicates the 95% Confidence Interval of the potential values the forecast can take.
+
+### Future Analysis
+
+Form here, we wish to determine the appropriate number of lags necessary for future analysis. To determine the correct number of lags, the command `VARselect` prompts the data to determine the appropriate number of lags given a selection of identification criteria such as $AIC$, $BIC$, etc. The $AIC$ criterion will be used in this instance to determine the number of lags appropriate for the model.
+
+```{r Number of Lags Determination, echo=FALSE}
+VARselect(difflogBHPI, 12)
+```
+## Conclusion
+
+Through a time-series approach to the data, we were successfully able to analyze how the BHPI has changed over the period of time in terms of their growth rates, first differences of the growth rates, and so forth. Multiple data visualizations showed the distribution of the variables and transformations were made to these variables in an attempt to normalize them. Numerous forms of Hypothesis Tests were conducted to explore relationships between the variables and their transformations, as well as to predict future values of these indexes and to forecast these values over a select timeframe.
+
+It should be considered that this data is currently collected on a monthly basis and is ever-changing. New BHPIs values are being produced, and it is only a matter of time to really understand, predict accurately, and witness where the Boston, Massachusetts Housing Market is headed.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
